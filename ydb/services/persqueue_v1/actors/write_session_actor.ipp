@@ -299,7 +299,7 @@ void TWriteSessionActor<UseMigrationProtocol>::Die(const TActorContext& ctx) {
     }
 
     State = ES_DYING;
-
+    TRlHelpers::PassAway(TActorBootstrapped<TWriteSessionActor>::SelfId());
     TActorBootstrapped<TWriteSessionActor>::Die(ctx);
 }
 
@@ -631,6 +631,7 @@ template<bool UseMigrationProtocol>
 void TWriteSessionActor<UseMigrationProtocol>::Handle(NPQ::TEvPartitionChooser::TEvChooseResult::TPtr& ev, const NActors::TActorContext& ctx) {
     auto* r = ev->Get();
     PartitionTabletId = r->TabletId;
+    InitialSeqNo = r->SeqNo;
     LastSourceIdUpdate = ctx.Now();
 
     ProceedPartition(r->PartitionId, ctx);
@@ -680,6 +681,7 @@ void TWriteSessionActor<UseMigrationProtocol>::CreatePartitionWriterCache(const 
 
     opts.WithDeduplication(UseDeduplication);
     opts.WithSourceId(SourceId);
+    opts.WithInitialSeqNo(InitialSeqNo);
     opts.WithExpectedGeneration(ExpectedGeneration);
 
     if constexpr (UseMigrationProtocol) {
@@ -1278,7 +1280,9 @@ void TWriteSessionActor<UseMigrationProtocol>::Handle(NGRpcService::TGRpcRequest
         }
     } else {
         if (ev->Get()->Retryable) {
-            Request->ReplyUnavaliable();
+            TServerMessage serverMessage;
+            serverMessage.set_status(Ydb::StatusIds::UNAVAILABLE);
+            Request->GetStreamCtx()->WriteAndFinish(std::move(serverMessage), grpc::Status::OK);
         } else {
             Request->ReplyUnauthenticated("refreshed token is invalid");
         }

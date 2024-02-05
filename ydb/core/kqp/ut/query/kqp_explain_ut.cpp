@@ -497,7 +497,13 @@ Y_UNIT_TEST_SUITE(KqpExplain) {
         UNIT_ASSERT_EQUAL(node.GetMapSafe().at("Table").GetStringSafe(), "KeyValue");
         node = FindPlanNodeByKv(plan, "Name", "TableFullScan");
         UNIT_ASSERT_EQUAL(node.GetMapSafe().at("Table").GetStringSafe(), "KeyValue");
-        node = FindPlanNodeByKv(plan, "Name", "TablePointLookup");
+
+        if (settings.AppConfig.GetTableServiceConfig().GetEnableKqpDataQueryStreamLookup()) {
+            node = FindPlanNodeByKv(plan, "Node Type", "TableLookup");
+        } else {
+            node = FindPlanNodeByKv(plan, "Name", "TablePointLookup");
+        }
+
         UNIT_ASSERT_EQUAL(node.GetMapSafe().at("Table").GetStringSafe(), "KeyValue");
     }
 
@@ -533,7 +539,12 @@ Y_UNIT_TEST_SUITE(KqpExplain) {
         UNIT_ASSERT_VALUES_EQUAL(rangeScansCount, 1);
 
         ui32 lookupsCount = 0;
-        lookupsCount = CountPlanNodesByKv(plan, "Node Type", "TablePointLookup-ConstantExpr");
+        if (settings.AppConfig.GetTableServiceConfig().GetEnableKqpDataQueryStreamLookup()) {
+            lookupsCount = CountPlanNodesByKv(plan, "Node Type", "TableLookup");
+        } else {
+            lookupsCount = CountPlanNodesByKv(plan, "Node Type", "TablePointLookup-ConstantExpr");
+        }
+
         UNIT_ASSERT_VALUES_EQUAL(lookupsCount, 1);
 
         /* check tables section */
@@ -844,7 +855,7 @@ Y_UNIT_TEST_SUITE(KqpExplain) {
         NJson::ReadJsonTree(*streamRes.PlanJson, &plan, true);
         UNIT_ASSERT(ValidatePlanNodeIds(plan));
 
-        auto readNode = FindPlanNodeByKv(plan, "Node Type", "Filter-TableFullScan");
+        auto readNode = FindPlanNodeByKv(plan, "Node Type", "TableFullScan");
         UNIT_ASSERT(readNode.IsDefined());
 
         auto& operators = readNode.GetMapSafe().at("Operators").GetArraySafe();
@@ -899,7 +910,11 @@ Y_UNIT_TEST_SUITE(KqpExplain) {
     }
 
     Y_UNIT_TEST(MultiJoinCteLinks) {
-        TKikimrRunner kikimr;
+        NKikimrConfig::TAppConfig appConfig;
+        appConfig.MutableTableServiceConfig()->SetEnableKqpDataQueryStreamLookup(false);
+        auto settings = TKikimrSettings()
+            .SetAppConfig(appConfig);
+        TKikimrRunner kikimr{settings};
         auto db = kikimr.GetTableClient();
         auto session = db.CreateSession().GetValueSync().GetSession();
 

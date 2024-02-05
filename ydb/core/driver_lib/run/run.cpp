@@ -111,7 +111,6 @@
 #include <ydb/services/ydb/ydb_export.h>
 #include <ydb/services/ydb/ydb_import.h>
 #include <ydb/services/ydb/ydb_logstore.h>
-#include <ydb/services/ydb/ydb_long_tx.h>
 #include <ydb/services/ydb/ydb_operation.h>
 #include <ydb/services/ydb/ydb_query.h>
 #include <ydb/services/ydb/ydb_scheme.h>
@@ -229,6 +228,7 @@ public:
         appData->EnableKqpSpilling = Config.GetTableServiceConfig().GetSpillingServiceConfig().GetLocalFileConfig().GetEnable();
 
         appData->CompactionConfig = Config.GetCompactionConfig();
+        appData->BackgroundCleaningConfig = Config.GetBackgroundCleaningConfig();
     }
 };
 
@@ -261,7 +261,6 @@ public:
 
             appData->ChannelProfiles->Profiles.emplace_back();
             TChannelProfiles::TProfile &outProfile = appData->ChannelProfiles->Profiles.back();
-            ui32 channelIdx = 0;
             for (const NKikimrConfig::TChannelProfileConfig::TProfile::TChannel &channel : profile.GetChannel()) {
                 Y_ABORT_UNLESS(channel.HasErasureSpecies());
                 Y_ABORT_UNLESS(channel.HasPDiskCategory());
@@ -275,7 +274,6 @@ public:
 
                 const TString kind = channel.GetStoragePoolKind();
                 outProfile.Channels.push_back(TChannelProfiles::TProfile::TChannel(erasure, pDiskCategory, vDiskCategory, kind));
-                ++channelIdx;
             }
         }
     }
@@ -565,8 +563,6 @@ void TKikimrRunner::InitializeGRpc(const TKikimrRunConfig& runConfig) {
         names["clickhouse_internal"] = &hasClickhouseInternal;
         TServiceCfg hasRateLimiter = false;
         names["rate_limiter"] = &hasRateLimiter;
-        TServiceCfg hasLongTx = false;
-        names["long_tx"] = &hasLongTx;
         TServiceCfg hasExport = services.empty();
         names["export"] = &hasExport;
         TServiceCfg hasImport = services.empty();
@@ -726,11 +722,6 @@ void TKikimrRunner::InitializeGRpc(const TKikimrRunConfig& runConfig) {
                 grpcRequestProxies[0], hasScripting.IsRlAllowed()));
         }
 
-        if (hasLongTx) {
-            server.AddService(new NGRpcService::TGRpcYdbLongTxService(ActorSystem.Get(), Counters,
-                grpcRequestProxies[0], hasLongTx.IsRlAllowed()));
-        }
-
         if (hasSchemeService) {
             // RPC RL enabled
             // We have no way to disable or enable this service explicitly
@@ -841,7 +832,7 @@ void TKikimrRunner::InitializeGRpc(const TKikimrRunConfig& runConfig) {
 
         if (hasQueryService) {
             server.AddService(new NGRpcService::TGRpcYdbQueryService(ActorSystem.Get(), Counters,
-                grpcRequestProxies[0], hasDataStreams.IsRlAllowed()));
+                grpcRequestProxies, hasDataStreams.IsRlAllowed(), grpcConfig.GetHandlersPerCompletionQueue()));
         }
 
         if (hasLogStore) {
@@ -1095,6 +1086,10 @@ void TKikimrRunner::InitializeAppData(const TKikimrRunConfig& runConfig)
 
     if (runConfig.AppConfig.HasS3ProxyResolverConfig()) {
         AppData->S3ProxyResolverConfig = runConfig.AppConfig.GetS3ProxyResolverConfig();
+    }
+
+    if (runConfig.AppConfig.HasGraphConfig()) {
+        AppData->GraphConfig.CopyFrom(runConfig.AppConfig.GetGraphConfig());
     }
 
     // setup resource profiles

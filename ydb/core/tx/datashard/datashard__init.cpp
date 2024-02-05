@@ -115,7 +115,7 @@ void TDataShard::TTxInit::Complete(const TActorContext &ctx) {
     Self->CreateChangeSender(ctx);
     Self->EnqueueChangeRecords(std::move(ChangeRecords));
     Self->MaybeActivateChangeSender(ctx);
-    Self->EmitHeartbeats(ctx);
+    Self->EmitHeartbeats();
 
     if (!Self->ChangesQueue) {
         if (!Self->ChangeExchangeSplitter.Done()) {
@@ -589,13 +589,11 @@ public:
 
             Self->PersistSys(db, Schema::Sys_State, Self->State);
 
-            if (AppData(ctx)->FeatureFlags.GetEnableMvcc()) {
-                auto state = *AppData(ctx)->FeatureFlags.GetEnableMvcc() ? EMvccState::MvccEnabled : EMvccState::MvccDisabled;
-                Self->PersistSys(db, Schema::SysMvcc_State, (ui32)state);
+            auto state = EMvccState::MvccEnabled;
+            Self->PersistSys(db, Schema::SysMvcc_State, (ui32)state);
 
-                LOG_DEBUG(ctx, NKikimrServices::TX_DATASHARD, TStringBuilder() << "TxInitSchema.Execute"
-                    << " MVCC state switched to" << (*AppData(ctx)->FeatureFlags.GetEnableMvcc() ? " enabled" : " disabled") << " state");
-            }
+            LOG_DEBUG(ctx, NKikimrServices::TX_DATASHARD, TStringBuilder() << "TxInitSchema.Execute"
+                << " MVCC state switched to  enabled state");
 
             Self->MvccSwitchState = TSwitchState::DONE;
         }

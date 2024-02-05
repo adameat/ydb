@@ -3,6 +3,7 @@
 
 #include <util/generic/queue.h>
 #include <util/random/random.h>
+#include <util/system/type_name.h>
 
 #include <ydb/core/base/hive.h>
 #include <ydb/core/base/statestorage.h>
@@ -52,6 +53,7 @@ using TFullObjectId = std::pair<TOwnerId, TObjectId>;
 using TResourceRawValues = std::tuple<i64, i64, i64, i64>; // CPU, Memory, Network, Counter
 using TResourceNormalizedValues = std::tuple<double, double, double, double>;
 using TOwnerIdxType = NScheme::TPairUi64Ui64;
+using TSubActorId = ui64; // = LocalId part of TActorId
 
 static constexpr std::size_t MAX_TABLET_CHANNELS = 256;
 
@@ -85,8 +87,9 @@ enum class EBalancerType {
     ScatterNetwork,
     Emergency,
     SpreadNeighbours,
+    Storage,
 
-    Last = SpreadNeighbours,
+    Last = Storage,
 };
 
 constexpr std::size_t EBalancerTypeSize = static_cast<std::size_t>(EBalancerType::Last) + 1;
@@ -104,7 +107,17 @@ enum class EResourceToBalance {
 EResourceToBalance ToResourceToBalance(NMetrics::EResource resource);
 
 struct ISubActor {
+    const TInstant StartTime;
+
     virtual void Cleanup() = 0;
+
+    virtual TString GetDescription() const {
+        return TypeName(*this);
+    }
+
+    virtual TSubActorId GetId() const = 0;
+
+    ISubActor() : StartTime(TActivationContext::Now()) {}
 };
 
 
@@ -207,6 +220,10 @@ inline std::tuple<ResourceTypes...> GetStDev(const TVector<std::tuple<ResourceTy
     return tuple_cast<ResourceTypes...>::cast(st_dev);
 }
 
+extern const std::unordered_map<TTabletTypes::EType, TString> TABLET_TYPE_SHORT_NAMES;
+
+extern const std::unordered_map<TString, TTabletTypes::EType> TABLET_TYPE_BY_SHORT_NAME;
+
 class THive;
 
 struct THiveSharedSettings {
@@ -243,6 +260,10 @@ struct THiveSharedSettings {
     TDuration GetStoragePoolFreshPeriod() const {
         return TDuration::MilliSeconds(CurrentConfig.GetStoragePoolFreshPeriod());
     }
+
+    double GetMinGroupUsageToBalance() const {
+        return CurrentConfig.GetMinGroupUsageToBalance();
+    }
 };
 
 struct TDrainSettings {
@@ -261,6 +282,12 @@ struct TBalancerSettings {
     std::optional<TFullObjectId> FilterObjectId;
 };
 
+struct TStorageBalancerSettings {
+    ui64 NumReassigns;
+    ui64 MaxInFlight = 1;
+    TString StoragePool;
+};
+
 struct TBalancerStats {
     ui64 TotalRuns = 0;
     ui64 TotalMovements = 0;
@@ -276,6 +303,7 @@ struct TNodeFilter {
     TVector<TNodeId> AllowedNodes;
     TVector<TDataCenterId> AllowedDataCenters;
     TSubDomainKey ObjectDomain;
+    TTabletTypes::EType TabletType = TTabletTypes::TypeInvalid;
 
     const THive& Hive;
 

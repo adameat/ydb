@@ -1,8 +1,8 @@
 """IPython terminal interface using prompt_toolkit"""
 
-import asyncio
 import os
 import sys
+import inspect
 from warnings import warn
 from typing import Union as UnionType, Optional
 
@@ -66,8 +66,8 @@ from .shortcuts.auto_suggest import (
 PTK3 = ptk_version.startswith('3.')
 
 
-class _NoStyle(Style): pass
-
+class _NoStyle(Style):
+    pass
 
 
 _style_overrides_light_bg = {
@@ -84,6 +84,20 @@ _style_overrides_linux = {
             Token.OutPromptNum: '#ansired bold',
 }
 
+
+def _backward_compat_continuation_prompt_tokens(method, width: int, *, lineno: int):
+    """
+    Sagemath use custom prompt and we broke them in 8.19.
+    """
+    sig = inspect.signature(method)
+    if "lineno" in inspect.signature(method).parameters or any(
+        [p.kind == p.VAR_KEYWORD for p in sig.parameters.values()]
+    ):
+        return method(width, lineno=lineno)
+    else:
+        return method(width)
+
+
 def get_default_editor():
     try:
         return os.environ['EDITOR']
@@ -96,7 +110,8 @@ def get_default_editor():
     if os.name == 'posix':
         return 'vi'  # the only one guaranteed to be there!
     else:
-        return 'notepad' # same in Windows!
+        return "notepad"  # same in Windows!
+
 
 # conservatively check for tty
 # overridden streams can result in things like:
@@ -293,7 +308,6 @@ class TerminalInteractiveShell(InteractiveShell):
 
         return self.editing_mode
 
-
     @observe('editing_mode')
     def _editing_mode(self, change):
         if self.pt_app:
@@ -321,7 +335,6 @@ class TerminalInteractiveShell(InteractiveShell):
 
     def refresh_style(self):
         self._style = self._make_style_from_name_or_cls(self.highlighting_style)
-
 
     highlighting_style_overrides = Dict(
         help="Override highlighting format for specific tokens"
@@ -588,6 +601,17 @@ class TerminalInteractiveShell(InteractiveShell):
         help="Display the current vi mode (when using vi editing mode)."
     ).tag(config=True)
 
+    prompt_line_number_format = Unicode(
+        "",
+        help="The format for line numbering, will be passed `line` (int, 1 based)"
+        " the current line number and `rel_line` the relative line number."
+        " for example to display both you can use the following template string :"
+        " c.TerminalInteractiveShell.prompt_line_number_format='{line: 4d}/{rel_line:+03d} | '"
+        " This will display the current line number, with leading space and a width of at least 4"
+        " character, as well as the relative line number 0 padded and always with a + or - sign."
+        " Note that when using Emacs mode the prompt of the first line may not update.",
+    ).tag(config=True)
+
     @observe('term_title')
     def init_term_title(self, change=None):
         # Enable or disable the terminal title.
@@ -736,7 +760,7 @@ class TerminalInteractiveShell(InteractiveShell):
         def get_message():
             return PygmentsTokens(self.prompts.in_prompt_tokens())
 
-        if self.editing_mode == 'emacs':
+        if self.editing_mode == "emacs" and self.prompt_line_number_format == "":
             # with emacs mode the prompt is (usually) static, so we call only
             # the function once. With VI mode it can toggle between [ins] and
             # [nor] so we can't precompute.
@@ -753,7 +777,9 @@ class TerminalInteractiveShell(InteractiveShell):
             "message": get_message,
             "prompt_continuation": (
                 lambda width, lineno, is_soft_wrap: PygmentsTokens(
-                    self.prompts.continuation_prompt_tokens(width)
+                    _backward_compat_continuation_prompt_tokens(
+                        self.prompts.continuation_prompt_tokens, width, lineno=lineno
+                    )
                 )
             ),
             "multiline": True,
@@ -848,7 +874,6 @@ class TerminalInteractiveShell(InteractiveShell):
             for cmd in ('clear', 'more', 'less', 'man'):
                 self.alias_manager.soft_define_alias(cmd, cmd)
 
-
     def __init__(self, *args, **kwargs) -> None:
         super(TerminalInteractiveShell, self).__init__(*args, **kwargs)
         self._set_autosuggestions(self.autosuggestions_provider)
@@ -856,7 +881,6 @@ class TerminalInteractiveShell(InteractiveShell):
         self.init_term_title()
         self.keep_running = True
         self._set_formatter(self.autoformatter)
-
 
     def ask_exit(self):
         self.keep_running = False
@@ -904,7 +928,6 @@ class TerminalInteractiveShell(InteractiveShell):
         # in existent use case.
 
         self._atexit_once()
-
 
     _inputhook = None
     def inputhook(self, context):

@@ -397,7 +397,7 @@ public:
             {
                 // YQL-16284
                 const char* node_name = CAST_NODE(VariableSetStmt, node)->name;
-                char* skip_statements[] = {
+                const char* skip_statements[] = {
                     "extra_float_digits",                   // jdbc
                     "application_name",                     // jdbc
                     "statement_timeout",                    // pg_dump
@@ -409,6 +409,7 @@ public:
                     "xmloption",                            // pg_dump
                     "client_min_messages",                  // pg_dump
                     "row_security",                        // pg_dump
+                    "escape_string_warning",               // zabbix
                     NULL,
                 };
 
@@ -446,7 +447,6 @@ public:
         }
 
         auto* tuples = listOfTuples.mutable_value()->mutable_items();
-        size_t idx = 0;
         size_t cols = columnTypes.size();
         for (size_t idx = 0; idx < autoParamLiterals.size(); idx += cols){
             auto* tuple = tuples->Add();
@@ -630,6 +630,55 @@ public:
         }
 
         return QL(QA("values"), QVL(valNames.data(), valNames.size()), VL(valueRows));
+    }
+
+    TAstNode* ParseSetConfig(const FuncCall* value) {
+        auto length = ListLength(value->args);
+        if (length != 3) {
+            AddError(TStringBuilder() << "Expected 3 arguments, but got: " << length);
+            return nullptr;
+        }
+
+        VariableSetStmt config;
+        config.kind = VAR_SET_VALUE;
+        auto arg0 = ListNodeNth(value->args, 0);
+        auto arg1 = ListNodeNth(value->args, 1);
+        auto arg2 = ListNodeNth(value->args, 2);
+        if (NodeTag(arg2) != T_TypeCast) {
+            AddError(TStringBuilder() << "Expected type cast node as is_local arg, but got node with tag");
+            return nullptr;
+        }
+        auto isLocalCast = CAST_NODE(TypeCast, arg2)->arg;
+        if (NodeTag(isLocalCast) != T_A_Const) {
+            AddError(TStringBuilder() << "Expected a_const in cast, but got something wrong: " << NodeTag(isLocalCast));
+            return nullptr;
+        }
+        auto isLocalConst = CAST_NODE(A_Const, isLocalCast);
+        if (NodeTag(isLocalConst->val) != T_String) {
+            AddError(TStringBuilder() << "Expected string in const, but got something wrong: " << NodeTag(isLocalCast));
+            return nullptr;
+        }
+        auto rawVal = TString(StrVal(isLocalConst->val));
+        if (rawVal != "t" && rawVal != "f") {
+            AddError(TStringBuilder() << "Expected t/f, but got " << rawVal);
+            return nullptr;
+        }
+        config.is_local = rawVal == "t";
+
+        if (NodeTag(arg0) != T_A_Const || NodeTag(arg1) != T_A_Const) {
+            AddError(TStringBuilder() << "Expected const with string, but got something else: " << NodeTag(arg0));
+            return nullptr;
+        }
+
+        auto name = CAST_NODE(A_Const, arg0)->val;
+        auto val = CAST_NODE(A_Const, arg1)->val;
+        if (NodeTag(name) != T_String || NodeTag(val) != T_String) {
+            AddError(TStringBuilder() << "Expected string const as name arg, but got something else: " << NodeTag(name));
+            return nullptr;
+        }
+        config.name = (char*)StrVal(name);
+        config.args = list_make1((void*)(&val));
+        return ParseVariableSetStmt(&config, true);
     }
 
     using TTraverseSelectStack = TStack<std::pair<const SelectStmt*, bool>>;
@@ -974,6 +1023,34 @@ public:
                 res.emplace_back(CreatePgStarResultItem());
                 i++;
             }
+            bool maybeSelectWithJustSetConfig = !inner && !sort && windowItems.empty() && !having && !groupBy && !whereFilter && !x->distinctClause  && ListLength(x->targetList) == 1;
+            if (maybeSelectWithJustSetConfig) {
+                auto node = ListNodeNth(x->targetList, 0);
+                if (NodeTag(node) != T_ResTarget) {
+                    NodeNotImplemented(x, node);
+                    return nullptr;
+                }
+                auto r = CAST_NODE(ResTarget, node);
+                if (!r->val) {
+                    AddError("SelectStmt: expected val");
+                    return nullptr;
+                }
+                auto call = r->val;
+                if (NodeTag(call) == T_FuncCall) {
+                    auto fn = CAST_NODE(FuncCall, call);
+                    if (ListLength(fn->funcname) == 1) {
+                        auto nameNode = ListNodeNth(fn->funcname, 0);
+                        if (NodeTag(nameNode) != T_String) {
+                            AddError("Function name must be string");
+                            return nullptr;
+                        }
+                        auto name = to_lower(TString(StrVal(ListNodeNth(fn->funcname, 0))));
+                        if (name == "set_config") {
+                            return ParseSetConfig(fn);
+                        }
+                    }
+                }
+            }
             for (int targetIndex = 0; targetIndex < ListLength(x->targetList); ++targetIndex) {
                 auto node = ListNodeNth(x->targetList, targetIndex);
                 if (NodeTag(node) != T_ResTarget) {
@@ -1243,7 +1320,7 @@ public:
             return {};
         }
         ui32 index = 0;
-        for (size_t i = 0; i < ListLength(returningList); i++) {
+        for (int i = 0; i < ListLength(returningList); i++) {
             auto node = ListNodeNth(returningList, i);
             if (NodeTag(node) != T_ResTarget) {
                 NodeNotImplemented(returningList, node);
@@ -1298,7 +1375,7 @@ public:
 
         TVector <TAstNode*> targetColumns;
         if (value->cols) {
-            for (size_t i = 0; i < ListLength(value->cols); i++) {
+            for (int i = 0; i < ListLength(value->cols); i++) {
                 auto node = ListNodeNth(value->cols, i);
                 if (NodeTag(node) != T_ResTarget) {
                     NodeNotImplemented(value, node);
@@ -1535,7 +1612,7 @@ private:
         if (!CheckConstraintSupported(pk))
             return false;
 
-        for (auto i = 0; i < ListLength(pk->keys); ++i) {
+        for (int i = 0; i < ListLength(pk->keys); ++i) {
             auto node = ListNodeNth(pk->keys, i);
             auto nodeName = StrVal(node);
 
@@ -1600,7 +1677,7 @@ private:
         TColumnInfo cinfo{.Name = node->colname};
 
         if (node->constraints) {
-            for (ui32 i = 0; i < ListLength(node->constraints); ++i) {
+            for (int i = 0; i < ListLength(node->constraints); ++i) {
                 auto constraintNode =
                         CAST_NODE(Constraint, ListNodeNth(node->constraints, i));
 
@@ -1697,7 +1774,7 @@ private:
             }
 
             if (cinfo.NotNull) {
-                constraints.push_back(QL(QA("not_null")));   
+                constraints.push_back(QL(QA("not_null")));
             }
 
             if (cinfo.Default) {
@@ -1822,7 +1899,7 @@ public:
             return nullptr;
         }
 
-        for (ui32 i = 0; i < ListLength(value->tableElts); ++i) {
+        for (int i = 0; i < ListLength(value->tableElts); ++i) {
             auto rawNode = ListNodeNth(value->tableElts, i);
 
             switch (NodeTag(rawNode)) {
@@ -1993,13 +2070,38 @@ public:
     }
 
     [[nodiscard]]
-    TAstNode* ParseVariableSetStmt(const VariableSetStmt* value) {
+    TAstNode* ParseVariableSetStmt(const VariableSetStmt* value, bool isSetConfig = false) {
         if (value->kind != VAR_SET_VALUE) {
             AddError(TStringBuilder() << "VariableSetStmt, not supported kind: " << (int)value->kind);
             return nullptr;
         }
 
         auto name = to_lower(TString(value->name));
+        if (isSetConfig) {
+            if (ListLength(value->args) != 1) {
+                AddError(TStringBuilder() << "VariableSetStmt, expected 1 arg, but got: " << ListLength(value->args));
+                return nullptr;
+            }
+            auto val = ListNodeNth(value->args, 0);
+            if (NodeTag(val) != T_String) {
+                AddError(TStringBuilder() << "VariableSetStmt, expected string literal for " << value->name << " option");
+                return nullptr;
+            }
+            TString rawStr = TString(StrVal(val));
+            if (name != "search_path") {
+                AddError(TStringBuilder() << "VariableSetStmt, set_config doesn't support that option:" << name);
+                return nullptr;
+            }
+            if (rawStr != "pg_catalog" && rawStr != "public" && rawStr != "" && rawStr != "information_schema") {
+                AddError(TStringBuilder() << "VariableSetStmt, search path supports only 'information_schema', 'public', 'pg_catalog', '' but got: '" << rawStr << "'");
+                return nullptr;
+            }
+            if (Settings.GUCSettings) {
+                Settings.GUCSettings->Set(name, rawStr, value->is_local);
+            }
+            return Statements.back();
+        }
+
         if (name == "useblocks" || name == "emitaggapply") {
             if (ListLength(value->args) != 1) {
                 AddError(TStringBuilder() << "VariableSetStmt, expected 1 arg, but got: " << ListLength(value->args));
@@ -2183,6 +2285,10 @@ public:
 
         auto [sink, key] = ParseWriteRangeVar(value->relation);
 
+        if (!sink || !key) {
+            return nullptr;
+        }
+
         std::vector<TAstNode*> options;
         options.push_back(QL(QA("pg_delete"), select));
         options.push_back(QL(QA("mode"), QA("delete")));
@@ -2277,10 +2383,16 @@ public:
         case TRANS_STMT_COMMIT:
             Statements.push_back(L(A("let"), A("world"), L(A("CommitAll!"),
                 A("world"))));
+            if (Settings.GUCSettings) {
+                Settings.GUCSettings->Commit();
+            }
             return true;
         case TRANS_STMT_ROLLBACK:
             Statements.push_back(L(A("let"), A("world"), L(A("CommitAll!"),
                 A("world"), QL(QL(QA("mode"), QA("rollback"))))));
+            if (Settings.GUCSettings) {
+                Settings.GUCSettings->RollBack();
+            }
             return true;
         default:
             AddError(TStringBuilder() << "TransactionStmt: kind is not supported: " << (int)value->kind);
@@ -2413,6 +2525,20 @@ public:
         return true;
     }
 
+    TString ResolveCluster(const TStringBuf schemaname) {
+        if (schemaname == "public") {
+            return "";
+        }
+        if (schemaname == "" && Settings.GUCSettings) {
+            auto search_path = Settings.GUCSettings->Get("search_path");
+            if (!search_path || *search_path == "public" || search_path->empty()) {
+                return Settings.DefaultCluster;
+            }
+            return TString(*search_path);
+        }
+        return TString(schemaname);
+    }
+
     TAstNode* BuildClusterSinkOrSourceExpression(
         bool isSink, const TStringBuf schemaname) {
       const auto p = Settings.ClusterMapping.FindPtr(schemaname);
@@ -2443,7 +2569,7 @@ public:
         return {};
       }
 
-      const auto cluster = !schemaname.Empty() && schemaname != "public" ? schemaname : Settings.DefaultCluster;
+      const auto cluster = ResolveCluster(schemaname);
       const auto sinkOrSource = BuildClusterSinkOrSourceExpression(isSink, cluster);
       const auto key = BuildTableKeyExpression(relname, isScheme);
       return {sinkOrSource, key};
@@ -2470,7 +2596,7 @@ public:
             return {};
         }
 
-        const auto cluster = !schemaname.Empty() && schemaname != "public" ? schemaname : Settings.DefaultCluster;
+        const auto cluster = ResolveCluster(schemaname);
         const auto sinkOrSource = BuildClusterSinkOrSourceExpression(true, cluster);
         const auto key = BuildPgObjectExpression(objectName, pgObjectType);
         return {sinkOrSource, key};
@@ -3262,6 +3388,7 @@ public:
         }
 
         auto name = names.back();
+
         const bool isAggregateFunc = NYql::NPg::HasAggregation(name);
         const bool hasReturnSet = NYql::NPg::HasReturnSetProc(name);
 
@@ -4219,7 +4346,7 @@ private:
         auto it = LowerBound(RowStarts.begin(), RowStarts.end(), Min((ui32)location, QuerySize));
         Y_ENSURE(it != RowStarts.end());
 
-        if (*it == location) {
+        if (*it == (ui32)location) {
             auto row = 1 + it - RowStarts.begin();
             auto column = 1;
             return NYql::TPosition(column, row);

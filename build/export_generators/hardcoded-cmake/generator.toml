@@ -4,6 +4,7 @@ templates=[
     { path="root_global_vars.jinja", dest="cmake/global_vars.cmake" },
 ]
 copy=[
+    "cmake/global_flags.compiler.gnu.march.cmake",
 	"cmake/global_flags.compiler.gnu.cmake",
     "cmake/global_flags.compiler.msvc.cmake",
     "cmake/global_flags.linker.gnu.cmake",
@@ -83,7 +84,7 @@ attrs=[
     "target_sources_custom",
     "use_export_script",
     "add_yunittest",
-    "set_yunittest_property",   
+    "set_yunittest_property",
 ]
 copy=[
     "cmake/common.cmake",

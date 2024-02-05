@@ -70,7 +70,9 @@ struct TCheckPermissionByAclResult
 
 struct TSetUserPasswordOptions
     : public TTimeoutOptions
-{ };
+{
+    bool PasswordIsTemporary = false;
+};
 
 struct TIssueTokenOptions
     : public TTimeoutOptions
@@ -109,6 +111,8 @@ struct TListUserTokensResult
 
 struct ISecurityClient
 {
+    virtual ~ISecurityClient() = default;
+
     virtual TFuture<void> AddMember(
         const TString& group,
         const TString& member,

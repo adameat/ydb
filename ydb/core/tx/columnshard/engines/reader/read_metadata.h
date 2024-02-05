@@ -25,7 +25,6 @@ class TReadContext;
 
 struct TReadStats {
     TInstant BeginTimestamp;
-    ui32 SelectedIndex{0};
     ui64 IndexGranules{0};
     ui64 IndexPortions{0};
     ui64 IndexBatches{0};
@@ -42,9 +41,8 @@ struct TReadStats {
 
     ui32 SelectedRows = 0;
 
-    TReadStats(ui32 indexNo = 0)
+    TReadStats()
         : BeginTimestamp(TInstant::Now())
-        , SelectedIndex(indexNo)
     {}
 
     void PrintToLog();
@@ -166,7 +164,7 @@ public:
         , IndexVersions(info)
         , Snapshot(snapshot)
         , ResultIndexSchema(info.GetSchema(Snapshot))
-        , ReadStats(std::make_shared<TReadStats>(info.GetLastSchema()->GetIndexInfo().GetId()))
+        , ReadStats(std::make_shared<TReadStats>())
     {
     }
 
@@ -267,15 +265,26 @@ public:
 
     const TSnapshot& GetRequestSnapshot() const { return RequestSnapshot; }
 
-    std::optional<std::string> GetColumnNameDef(const ui32 columnId) const { 
+    std::optional<std::string> GetColumnNameDef(const ui32 columnId) const {
         if (!ResultIndexSchema) {
             return {};
         }
-        auto f = ResultIndexSchema->GetFieldByColumnId(columnId);
+        auto f = ResultIndexSchema->GetFieldByColumnIdOptional(columnId);
         if (!f) {
             return {};
         }
         return f->name();
+    }
+
+    std::optional<std::string> GetEntityName(const ui32 entityId) const {
+        if (!ResultIndexSchema) {
+            return {};
+        }
+        auto result = ResultIndexSchema->GetIndexInfo().GetColumnNameOptional(entityId);
+        if (!!result) {
+            return result;
+        }
+        return ResultIndexSchema->GetIndexInfo().GetIndexNameOptional(entityId);
     }
 
     explicit TReadStatsMetadata(ui64 tabletId, const ESorting sorting, const TProgramContainer& ssaProgram, const std::shared_ptr<ISnapshotSchema>& schema, const TSnapshot& requestSnapshot)
