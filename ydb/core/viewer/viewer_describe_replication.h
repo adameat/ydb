@@ -49,7 +49,7 @@ public:
         yaml.AddParameter({
             .Name = "include_stats",
             .Description = "include stat flag",
-            .Type = "bool",
+            .Type = "boolean",
         });
         yaml.AddParameter({
             .Name = "timeout",
@@ -64,6 +64,7 @@ public:
         yaml.AddParameter({
             .Name = "ui64",
             .Description = "return ui64 as number",
+            .Type = "boolean",
             .Required = false,
         });
         yaml.SetResponseSchema(TProtoToYaml::ProtoToYamlSchema<Ydb::Replication::DescribeReplicationResult>());

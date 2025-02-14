@@ -52,7 +52,7 @@ public:
                 in: query
                 description: include stat flag
                 required: false
-                type: bool
+                type: boolean
               - name: timeout
                 in: query
                 description: timeout in ms

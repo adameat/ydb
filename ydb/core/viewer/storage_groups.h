@@ -2239,6 +2239,7 @@ public:
                     required: false
                     type: string
                   - name: filter
+                    in: query
                     description: filter to search for in group ids and pool names
                     required: false
                     type: string

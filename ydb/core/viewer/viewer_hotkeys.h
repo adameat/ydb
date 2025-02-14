@@ -163,7 +163,7 @@ public:
         yaml.AddParameter({
             .Name = "polling_factor",
             .Description = "polling factor",
-            .Type = "float",
+            .Type = "number",
         });
         yaml.AddParameter({
             .Name = "limit",
