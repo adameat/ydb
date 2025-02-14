@@ -1,7 +1,9 @@
 #include <unordered_set>
 #include <util/stream/str.h>
+#include <google/protobuf/descriptor.h>
 #include <google/protobuf/duration.pb.h>
 #include <google/protobuf/timestamp.pb.h>
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/wrappers.pb.h>
 #include <google/protobuf/util/time_util.h>
 #include "yaml.h"
@@ -10,12 +12,15 @@
 #undef GetMessage
 #endif
 
-void TProtoToYaml::FillEnum(YAML::Node property, const ::google::protobuf::EnumDescriptor* enumDescriptor, const TEnumSettings& enumSettings) {
-    auto enm = property["enum"];
-    auto valueCount = enumDescriptor->value_count();
+using namespace ::google::protobuf;
+
+YAML::Node TProtoToYaml::ProtoToYamlSchema(const EnumDescriptor* descriptor, const TEnumSettings& enumSettings) {
+    YAML::Node to;
+    auto enm = to["enum"];
+    auto valueCount = descriptor->value_count();
     TString defaultValue;
     for (int i = 0; i < valueCount; ++i) {
-        auto enumValueDescriptor = enumDescriptor->value(i);
+        auto enumValueDescriptor = descriptor->value(i);
         auto enumName = enumValueDescriptor->name();
         if (enumSettings.ConvertToLowerCase) {
             enumName = to_lower(enumName);
@@ -29,12 +34,82 @@ void TProtoToYaml::FillEnum(YAML::Node property, const ::google::protobuf::EnumD
         enm.push_back(enumName);
     }
     if (defaultValue && !enumSettings.SkipDefaultValue) {
-        property["default"] = defaultValue;
+        to["default"] = defaultValue;
+    }
+    return to;
+}
+
+YAML::Node TProtoToYaml::ProtoToYamlSchema(const FieldDescriptor* descriptor, std::unordered_set<const Descriptor*>& descriptors) {
+    if (descriptor->is_repeated() && !descriptor->is_map()) {
+        YAML::Node to;
+        to["type"] = "array";
+        to["items"] = ProtoToYamlSchemaNoRepeated(descriptor, descriptors);
+        return to;
+    } else {
+        return ProtoToYamlSchemaNoRepeated(descriptor, descriptors);
     }
 }
 
-YAML::Node TProtoToYaml::ProtoToYamlSchema(const ::google::protobuf::Descriptor* descriptor, std::unordered_set<const ::google::protobuf::Descriptor*>& descriptors) {
-    using namespace ::google::protobuf;
+YAML::Node TProtoToYaml::ProtoToYamlSchemaNoRepeated(const FieldDescriptor* descriptor, std::unordered_set<const Descriptor*>& descriptors) {
+    YAML::Node to;
+    if (descriptor->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
+        const Descriptor* message = descriptor->message_type();
+        if (message->options().map_entry()) {
+            to["type"] = "object";
+            to["additionalProperties"]["type"] = GetFieldTypeName(message->map_value());
+        } else {
+            if (message->full_name() == Duration::descriptor()->full_name()) {
+                to["type"] = "string";
+                to["example"] = "3600s";
+            } else if(message->full_name() == Timestamp::descriptor()->full_name()) {
+                to["type"] = "string";
+                to["format"] = "date-time";
+                to["example"] = "2025-04-09T00:00:00Z";
+            } else if (message->full_name() == BoolValue::descriptor()->full_name()) {
+                to["type"] = "boolean";
+            } else if (message->full_name() == StringValue::descriptor()->full_name()) {
+                to["type"] = "string";
+            } else if (message->full_name() == Int64Value::descriptor()->full_name()) {
+                to["type"] = "integer";
+                to["format"] = "int64";
+            } else if (descriptors.insert(message).second) {
+                to = ProtoToYamlSchema(message, descriptors);
+                descriptors.erase(message);
+            }
+        }
+    } else {
+        to["type"] = GetFieldTypeName(descriptor);
+        switch (descriptor->cpp_type()) {
+        case FieldDescriptor::CPPTYPE_INT32:
+            to["format"] = "int32";
+            break;
+        case FieldDescriptor::CPPTYPE_UINT32:
+            to["format"] = "uint32";
+            break;
+        case FieldDescriptor::CPPTYPE_INT64:
+            to["format"] = "int64";
+            break;
+        case FieldDescriptor::CPPTYPE_UINT64:
+            to["format"] = "uint64";
+            break;
+        case FieldDescriptor::CPPTYPE_FLOAT:
+            to["format"] = "float";
+            break;
+        case FieldDescriptor::CPPTYPE_DOUBLE:
+            to["format"] = "double";
+            break;
+        default:
+            break;
+        }
+
+        if (descriptor->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
+            to = ProtoToYamlSchema(descriptor->enum_type());
+        }
+    }
+    return to;
+}
+
+YAML::Node TProtoToYaml::ProtoToYamlSchema(const Descriptor* descriptor, std::unordered_set<const Descriptor*>& descriptors) {
     if (descriptor == nullptr) {
         return {};
     }
@@ -46,82 +121,52 @@ YAML::Node TProtoToYaml::ProtoToYamlSchema(const ::google::protobuf::Descriptor*
         auto properties = to["properties"];
         int oneofFields = descriptor->oneof_decl_count();
         for (int idx = 0; idx < oneofFields; ++idx) {
-            const OneofDescriptor* fieldDescriptor = descriptor->oneof_decl(idx);
-            if (fieldDescriptor->name().StartsWith("_")) {
+            const OneofDescriptor* oneofDescriptor = descriptor->oneof_decl(idx);
+            if (oneofDescriptor->name().StartsWith("_") || oneofDescriptor->is_synthetic()) {
                 continue;
             }
-            properties[fieldDescriptor->name()]["type"] = "oneOf";
+            auto oneOf = properties[oneofDescriptor->name()]["oneOf"];
+            for (int oneOfIdx = 0; oneOfIdx < oneofDescriptor->field_count(); ++oneOfIdx) {
+                const FieldDescriptor* fieldDescriptor = oneofDescriptor->field(oneOfIdx);
+                oneOf[fieldDescriptor->name()] = ProtoToYamlSchema(fieldDescriptor, descriptors);
+            }
         }
         for (int idx = 0; idx < fields; ++idx) {
             const FieldDescriptor* fieldDescriptor = descriptor->field(idx);
-            auto property = properties[fieldDescriptor->name()];
-            if (fieldDescriptor->is_repeated()) {
-                property["type"] = "array";
-                property.reset(property["items"]);
+            if (fieldDescriptor->real_containing_oneof() != nullptr) {
+                continue;
             }
-            if (fieldDescriptor->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-                if (fieldDescriptor->message_type()->full_name() == google::protobuf::Duration::descriptor()->full_name()) {
-                    property["type"] = "string";
-                    property["example"] = "3600s";
-                } else if (fieldDescriptor->message_type()->full_name() == google::protobuf::BoolValue::descriptor()->full_name()) {
-                    property["type"] = "boolean";
-                } else if (fieldDescriptor->message_type()->full_name() == google::protobuf::StringValue::descriptor()->full_name()) {
-                    property["type"] = "string";
-                } else if (fieldDescriptor->message_type()->full_name() == google::protobuf::Int64Value::descriptor()->full_name()) {
-                    property["type"] = "integer";
-                    property["format"] = "int64";
-                } else if (descriptors.insert(descriptor).second) {
-                    property = ProtoToYamlSchema(fieldDescriptor->message_type(), descriptors);
-                    descriptors.erase(descriptor);
-                }
-            } else {
-                switch (fieldDescriptor->cpp_type()) {
-                case FieldDescriptor::CPPTYPE_INT32:
-                    property["type"] = "integer";
-                    property["format"] = "int32";
-                    break;
-                case FieldDescriptor::CPPTYPE_UINT32:
-                    property["type"] = "integer";
-                    property["format"] = "uint32";
-                    break;
-                case FieldDescriptor::CPPTYPE_INT64:
-                    property["type"] = "string"; // because of JS compatibility (JavaScript could not handle large numbers (bigger than 2^53))
-                    property["format"] = "int64";
-                    break;
-                case FieldDescriptor::CPPTYPE_UINT64:
-                    property["type"] = "string"; // because of JS compatibility (JavaScript could not handle large numbers (bigger than 2^53))
-                    property["format"] = "uint64";
-                    break;
-                case FieldDescriptor::CPPTYPE_STRING:
-                case FieldDescriptor::CPPTYPE_ENUM:
-                    property["type"] = "string";
-                    break;
-                case FieldDescriptor::CPPTYPE_FLOAT:
-                    property["type"] = "number";
-                    property["format"] = "float";
-                    break;
-                case FieldDescriptor::CPPTYPE_DOUBLE:
-                    property["type"] = "number";
-                    property["format"] = "double";
-                    break;
-                case FieldDescriptor::CPPTYPE_BOOL:
-                    property["type"] = "boolean";
-                    break;
-                case FieldDescriptor::CPPTYPE_MESSAGE:
-                    property["type"] = "object";
-                    break;
-                }
-
-                if (fieldDescriptor->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
-                    FillEnum(property, fieldDescriptor->enum_type());
-                }
-            }
+            properties[fieldDescriptor->name()] = ProtoToYamlSchema(fieldDescriptor, descriptors);
         }
     }
     return to;
 }
 
-YAML::Node TProtoToYaml::ProtoToYamlSchema(const ::google::protobuf::Descriptor* descriptor) {
-    std::unordered_set<const ::google::protobuf::Descriptor*> descriptors;
+TString TProtoToYaml::GetFieldTypeName(const ::google::protobuf::FieldDescriptor* descriptor) {
+    switch (descriptor->cpp_type()) {
+    case FieldDescriptor::CPPTYPE_INT32:
+    case FieldDescriptor::CPPTYPE_UINT32:
+        return "integer";
+    case FieldDescriptor::CPPTYPE_INT64:
+    case FieldDescriptor::CPPTYPE_UINT64:
+        return "string"; // because of JS compatibility (JavaScript could not handle large numbers (bigger than 2^53))
+    case FieldDescriptor::CPPTYPE_STRING:
+        return "string";
+    case FieldDescriptor::CPPTYPE_FLOAT:
+    case FieldDescriptor::CPPTYPE_DOUBLE:
+        return "number";
+    case FieldDescriptor::CPPTYPE_BOOL:
+        return "boolean";
+    case FieldDescriptor::CPPTYPE_ENUM:
+        return "string";
+    case FieldDescriptor::CPPTYPE_MESSAGE:
+        return "object";
+    default:
+        return "unknown";
+    }
+}
+
+YAML::Node TProtoToYaml::ProtoToYamlSchema(const Descriptor* descriptor) {
+    std::unordered_set<const Descriptor*> descriptors;
     return ProtoToYamlSchema(descriptor, descriptors);
 }

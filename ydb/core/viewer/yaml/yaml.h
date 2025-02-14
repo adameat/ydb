@@ -13,9 +13,7 @@ struct TEnumSettings {
 class TProtoToYaml {
 public:
     static YAML::Node ProtoToYamlSchema(const ::google::protobuf::Descriptor* descriptor);
-
-    static void FillEnum(YAML::Node property, const ::google::protobuf::EnumDescriptor* enumDescriptor, const TEnumSettings& enumSettings = TEnumSettings());
-    static void FillEnum(YAML::Node property, const std::vector<std::string_view>& enumNames, const TEnumSettings& enumSettings);
+    static YAML::Node ProtoToYamlSchema(const ::google::protobuf::EnumDescriptor* descriptor, const TEnumSettings& enumSettings = TEnumSettings());
 
     template <typename ProtoType>
     static YAML::Node ProtoToYamlSchema() {
@@ -24,4 +22,7 @@ public:
 
 protected:
     static YAML::Node ProtoToYamlSchema(const ::google::protobuf::Descriptor* descriptor, std::unordered_set<const ::google::protobuf::Descriptor*>& descriptors);
+    static YAML::Node ProtoToYamlSchema(const ::google::protobuf::FieldDescriptor* descriptor, std::unordered_set<const ::google::protobuf::Descriptor*>& descriptors);
+    static YAML::Node ProtoToYamlSchemaNoRepeated(const ::google::protobuf::FieldDescriptor* descriptor, std::unordered_set<const ::google::protobuf::Descriptor*>& descriptors);
+    static TString GetFieldTypeName(const ::google::protobuf::FieldDescriptor* descriptor);
 };

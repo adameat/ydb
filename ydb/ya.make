@@ -2,6 +2,7 @@ RECURSE(
     apps
     core
     library
+    meta
     mvp
     public
     services

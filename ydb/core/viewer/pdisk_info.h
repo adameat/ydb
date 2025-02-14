@@ -281,10 +281,10 @@ public:
 
         node["get"]["responses"]["200"]["content"]["application/json"]["schema"] = TProtoToYaml::ProtoToYamlSchema<NKikimrViewer::TPDiskInfo>();
         YAML::Node properties(node["get"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["BSC"]["properties"]);
-        TProtoToYaml::FillEnum(properties["PDisk"]["properties"]["StatusV2"], NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EDriveStatus>());
-        TProtoToYaml::FillEnum(properties["PDisk"]["properties"]["DecommitStatus"], NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EDecommitStatus>());
-        TProtoToYaml::FillEnum(properties["PDisk"]["properties"]["Type"], NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EPDiskType>());
-        TProtoToYaml::FillEnum(properties["VDisks"]["items"]["properties"]["StatusV2"], NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EVDiskStatus>());
+        properties["PDisk"]["properties"]["StatusV2"] = TProtoToYaml::ProtoToYamlSchema(NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EDriveStatus>());
+        properties["PDisk"]["properties"]["DecommitStatus"] = TProtoToYaml::ProtoToYamlSchema(NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EDecommitStatus>());
+        properties["PDisk"]["properties"]["Type"] = TProtoToYaml::ProtoToYamlSchema(NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EPDiskType>());
+        properties["VDisks"]["items"]["properties"]["StatusV2"] = TProtoToYaml::ProtoToYamlSchema(NProtoBuf::GetEnumDescriptor<NKikimrBlobStorage::EVDiskStatus>());
         return node;
     }
 };
