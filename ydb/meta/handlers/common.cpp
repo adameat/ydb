@@ -609,11 +609,11 @@ TString SnakeToCCamelCaseProtoConverter(const google::protobuf::FieldDescriptor&
 NJson::TJsonReaderConfig THandlerActorYdb::JsonReaderConfig;
 NJson::TJsonWriterConfig THandlerActorYdb::JsonWriterConfig;
 NProtobufJson::TJson2ProtoConfig THandlerActorYdb::Json2ProtoConfig = NProtobufJson::TJson2ProtoConfig()
-        .SetNameGenerator(SnakeToCamelCaseProtoConverter)
+//        .SetNameGenerator(SnakeToCamelCaseProtoConverter)
         .SetMapAsObject(true)
         .SetAllowString2TimeConversion(true);
 NProtobufJson::TProto2JsonConfig THandlerActorYdb::Proto2JsonConfig = NProtobufJson::TProto2JsonConfig()
-        .SetNameGenerator(SnakeToCamelCaseProtoConverter)
+//        .SetNameGenerator(SnakeToCamelCaseProtoConverter)
         .SetMapAsObject(true)
         .SetEnumMode(NProtobufJson::TProto2JsonConfig::EnumValueMode::EnumName)
         .SetConvertAny(true);

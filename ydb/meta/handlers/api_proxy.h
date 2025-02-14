@@ -6,17 +6,19 @@ namespace NMeta {
 class THandlerActorApiProxyRequest : public NActors::TActorBootstrapped<THandlerActorApiProxyRequest> {
 public:
     using TBase = NActors::TActorBootstrapped<THandlerActorApiProxyRequest>;
-    NActors::TActorId HttpProxyId;
+    std::shared_ptr<TYdbMeta> YdbMeta;
     NHttp::TEvHttpProxy::TEvHttpIncomingRequest::TPtr Event;
+    TString Prefix;
     TString TargetHost;
     TString Destination;
 
-    THandlerActorApiProxyRequest(NActors::TActorId httpProxyId, NHttp::TEvHttpProxy::TEvHttpIncomingRequest::TPtr event)
-        : HttpProxyId(httpProxyId)
+    THandlerActorApiProxyRequest(std::shared_ptr<TYdbMeta> ydbMeta, NHttp::TEvHttpProxy::TEvHttpIncomingRequest::TPtr event)
+        : YdbMeta(std::move(ydbMeta))
         , Event(std::move(event))
     {}
 
     bool IsHostAllowed() {
+        // TODO(xenoxeno): implement
         return true;
     }
 
@@ -37,8 +39,18 @@ public:
             return PassAway();
         }
         TStringBuf host = destination.NextTok('/');
+        TStringBuf schema;
+        if (host.StartsWith("https:") || host.StartsWith("http:")) {
+            schema = host.NextTok(':');
+        }
         TargetHost = host;
         Destination = TString("/") + destination;
+        Prefix = "/proxy/host/";
+        if (schema) {
+            Prefix += schema;
+            Prefix += ':';
+        }
+        Prefix += TargetHost;
 
         if (!IsHostAllowed()) {
             auto response = Event->Get()->Request->CreateResponse("403", "Forbidden");
@@ -48,7 +60,7 @@ public:
 
         NHttp::THttpOutgoingRequestPtr request = new NHttp::THttpOutgoingRequest(
             Event->Get()->Request->Method,
-            "http",
+            schema ? schema : "http",
             TargetHost,
             Destination,
             Event->Get()->Request->Protocol,
@@ -64,7 +76,7 @@ public:
         // TODO(xenoxeno): timeout
         requestEvent->Timeout = TDuration::Seconds(120);
         requestEvent->AllowConnectionReuse = !Event->Get()->Request->IsConnectionClose();
-        Send(HttpProxyId, requestEvent.release());
+        Send(YdbMeta->HttpProxyId, requestEvent.release());
 
         // TODO(xenoxeno): cancelling of requests
 
@@ -72,11 +84,71 @@ public:
         Become(&THandlerActorApiProxyRequest::StateWork, TDuration::Seconds(120), new NActors::TEvents::TEvWakeup());
     }
 
+    TString RewriteContentHtml(TStringBuf content, const TString& search, const TString& replace) {
+        TString result;
+        TString::size_type pos = 0;
+        while (pos < content.size()) {
+            TString::size_type start = content.find(search, pos);
+            if (start == TString::npos) {
+                result.append(content, pos, content.size() - pos);
+                break;
+            }
+            result.append(content, pos, start - pos);
+            result.append(replace);
+            pos = start + search.size();
+        }
+        return result;
+    }
+
+    TString RewriteContentHtml(TStringBuf content) {
+        TString result = RewriteContentHtml(content, " src='/", TStringBuilder() << " src='" << Prefix << "/");
+        result = RewriteContentHtml(result, " href='/", TStringBuilder() << " href='" << Prefix << "/");
+        return result;
+    }
+
+    TString RewriteContent(const TString& response) {
+        NHttp::THttpResponseParser parser(response);
+        NHttp::THeadersBuilder headers(parser.Headers);
+        headers.Erase("Allow");
+        headers.Erase("Access-Control-Allow-Origin");
+        headers.Erase("Access-Control-Allow-Headers");
+        headers.Erase("Access-Control-Allow-Methods");
+        headers.Erase("Access-Control-Expose-Headers");
+        headers.Erase("Access-Control-Allow-Credentials");
+        if (headers["Content-Encoding"] == "deflate") {
+            headers.Erase("Content-Encoding"); // we work with decompressed content
+            headers.Erase("Content-Length"); // we will need new length after decompression
+        }
+        if (headers.Has("Location") && headers["Location"].StartsWith("/")) {
+            headers.Set("Location", TStringBuilder() << Prefix << headers["Location"]);
+        }
+        headers.Set("X-Proxy-Name", YdbMeta->ExternalEndpoint);
+        NHttp::THttpResponseRenderer renderer;
+        renderer.InitResponse(parser.Protocol, parser.Version, parser.Status, parser.Message);
+        renderer.Set(headers);
+        if (parser.HasBody()) {
+            if (parser.ContentType.StartsWith("text/html")) {
+                renderer.SetBody(RewriteContentHtml(parser.Body));
+            } else {
+                renderer.SetBody(parser.Body);
+            }
+        }
+        renderer.Finish();
+        return renderer.AsString();
+    }
+
     void Handle(NHttp::TEvHttpProxy::TEvHttpIncomingResponse::TPtr& ev) {
-        auto response = ev->Get()->Response->Reverse(Event->Get()->Request);
-        // TODO(xenoxeno): process headers for redirect location
-        // TODO(xenoxeno): process html for hyperlinks
-        Send(Event->Sender, new NHttp::TEvHttpProxy::TEvHttpOutgoingResponse(response));
+        if (ev->Get()->Error) {
+            NHttp::THttpOutgoingResponsePtr response = Event->Get()->Request->CreateResponseServiceUnavailable(ev->Get()->Error, "text/plain");
+            Send(Event->Sender, new NHttp::TEvHttpProxy::TEvHttpOutgoingResponse(response));
+        } else {
+            TString httpResponse = ev->Get()->Response->AsString();
+            // TODO(xenoxeno): make rewrite conditional (we don't wan't to rewrite binary data)
+            httpResponse = RewriteContent(httpResponse);
+            // TODO(xenoxeno): process html for hyperlinks
+            NHttp::THttpOutgoingResponsePtr response = Event->Get()->Request->CreateResponseString(httpResponse);
+            Send(Event->Sender, new NHttp::TEvHttpProxy::TEvHttpOutgoingResponse(response));
+        }
         PassAway();
     }
 
@@ -106,7 +178,9 @@ public:
     {}
 
     void Handle(NHttp::TEvHttpProxy::TEvHttpIncomingRequest::TPtr event) {
-        Register(new THandlerActorApiProxyRequest(HttpProxyId, event));
+        if (auto ydbMeta = InstanceYdbMeta.lock()) {
+            Register(new THandlerActorApiProxyRequest(ydbMeta, event));
+        }
     }
 
     static YAML::Node GetSwagger() {

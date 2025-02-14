@@ -1070,7 +1070,7 @@ public:
     }
 
     template<typename TMessage>
-    void ParsePostData(TMessage& message) throw() {
+    void ParsePostData(TMessage& message) {
         NProtobufJson::Json2Proto(Request.Parameters.PostData, message, Json2ProtoConfig);
     }
 

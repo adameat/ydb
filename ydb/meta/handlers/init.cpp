@@ -3,6 +3,7 @@
 #include <ydb/core/viewer/yaml/yaml.h>
 #include <ydb/library/actors/http/http_static.h>
 #include "http_check.h"
+#include "http_ok.h"
 #include "http_sensors.h"
 #include "meta_swagger.h"
 #include "meta_db_clusters.h"
@@ -108,6 +109,8 @@ void TYdbMeta::SetupMetaHandlers() {
                      );
 
     registerSwaggerHandler(HttpProxyId, "/ping", new THandlerActorHttpCheck());
+    registerHandler(HttpProxyId, "/code-assist-telemetry", new THandlerActorHttpOk());
+    registerHandler(HttpProxyId, "/code-assist-suggestion", new THandlerActorHttpOk());
     registerSwaggerHandler(HttpProxyId, "/proxy/", new THandlerActorApiProxy(HttpProxyId));
     registerSwaggerHandler(HttpProxyId, "/meta/sensors.json", new THandlerActorHttpSensors());
     registerSwaggerHandler(HttpIncomingCachedProxyId, "/meta/db_clusters", new THandlerActorMetaDbClusters());
