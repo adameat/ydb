@@ -65,8 +65,8 @@ public:
     }
 
     void ReplyErrorAndPassAway(const TString& error) {
-        ALOG_ERROR(HttpLog, GetSocketName() << "connection closed with error: " << error);
         if (RequestOwner) {
+            ALOG_ERROR(HttpLog, GetSocketName() << "connection closed with error: " << error);
             Send(RequestOwner, new TEvHttpProxy::TEvHttpIncomingResponse(Request, Response, error));
             RequestOwner = TActorId();
             THolder<TEvHttpProxy::TEvReportSensors> sensors(BuildOutgoingRequestSensors(Request, Response));

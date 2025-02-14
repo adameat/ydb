@@ -3,6 +3,7 @@ RECURSE(
     docs
     core
     library
+    meta
     mvp
     public
     services
