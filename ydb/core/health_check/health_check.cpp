@@ -714,7 +714,7 @@ public:
 
     THashMap<TString, THintOverloadedShard> OverloadedShardHints;
     static constexpr size_t MAX_OVERLOADED_SHARDS_HINTS = 10;
-    static constexpr double OVERLOADED_SHARDS_CPU_CORES = 0.01; /* HACK */
+    static constexpr double OVERLOADED_SHARDS_CPU_CORES = 0.75;
 
     struct TTabletRequestsState {
         struct TTabletState {
@@ -992,7 +992,7 @@ public:
     [[nodiscard]] TRequestResponse<TEvSysView::TEvGetPartitionStatsResult> RequestPartitionStats(TTabletId schemeShardId, TSubDomainKey subDomainKey) {
         THolder<TEvSysView::TEvGetPartitionStats> request = MakeHolder<TEvSysView::TEvGetPartitionStats>();
         NKikimrSysView::TEvGetPartitionStats& record = request->Record;
-        record.MutableFilter()->MutableNotLess()->SetCPUCores(OVERLOADED_SHARDS_CPU_CORES); //
+        record.MutableFilter()->MutableNotLess()->SetCPUCores(OVERLOADED_SHARDS_CPU_CORES);
         record.SetDomainKeyOwnerId(subDomainKey.GetSchemeShard());
         record.SetDomainKeyPathId(subDomainKey.GetPathId());
         return RequestTabletPipe<TEvSysView::TEvGetPartitionStatsResult>(schemeShardId, request.Release(), TTabletRequestsState::RequestGetPartitionStats);
@@ -1455,7 +1455,7 @@ public:
 
     bool CheckOverloadedShardHint(const TEvSchemeShard::TEvDescribeSchemeResult& response, THintOverloadedShard& hint) {
         const auto& policy(response.GetRecord().GetPathDescription().GetTable().GetPartitionConfig().GetPartitioningPolicy());
-        if (/*HACK ! */policy.GetSplitByLoadSettings().GetEnabled()) {
+        if (!policy.GetSplitByLoadSettings().GetEnabled()) {
             hint.Message = "Split by load is disabled on the table"; // do not change without changing the logic in the UI
             return true;
         }

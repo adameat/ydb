@@ -309,6 +309,27 @@ private:
         }
 
         bool includePathColumn = !record.HasIncludePathColumn() || record.GetIncludePathColumn();
+        bool hasFilter = record.HasFilter();
+        auto matchesFilter = [&](const NKikimrSysView::TPartitionStats& stats) {
+            const auto& filter = record.GetFilter();
+            if (filter.HasNotLess()) {
+                if (filter.GetNotLess().HasCPUCores() && stats.GetCPUCores() < filter.GetNotLess().GetCPUCores()) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        auto addStats = [&](const auto& pathId, const auto& tableStats, ui64 partIdx) {
+            auto stats = result->Record.AddStats();
+            auto* key = stats->MutableKey();
+            key->SetOwnerId(pathId.OwnerId);
+            key->SetPathId(pathId.LocalPathId);
+            key->SetPartIdx(partIdx);
+            if (includePathColumn) {
+                stats->SetPath(tableStats.Path);
+            }
+            return stats;
+        };
 
         auto matchesFilter = [&](const NKikimrSysView::TPartitionStats& stats) {
                 if (record.HasFilter()) {
@@ -335,35 +356,24 @@ private:
 
             for (ui64 partIdx = startPartIdx; partIdx < end; ++partIdx) {
                 NKikimrSysView::TPartitionStatsResult* stats = nullptr;
+                if (!hasFilter) {
+                    stats = addStats(pathId, tableStats, partIdx);
+                }
                 auto shardIdx = tableStats.ShardIndices[partIdx];
                 auto part = tableStats.Partitions.find(shardIdx);
                 if (part != tableStats.Partitions.end()) {
                     for (const auto& followerStat : part->second.FollowerStats) {
-                        if (!matchesFilter(followerStat.second)) {
+                        if (hasFilter && !matchesFilter(followerStat.second)) {
                             continue;
                         }
-                        if (stats == nullptr) {
-                            stats = result->Record.AddStats();
+                        if (!stats) {
+                            stats = addStats(pathId, tableStats, partIdx);
                         }
                         *stats->AddStats() = followerStat.second;
                     }
                 }
 
-                if (!stats) {
-                    continue;
-                }
-
-                auto* key = stats->MutableKey();
-
-                key->SetOwnerId(pathId.OwnerId);
-                key->SetPathId(pathId.LocalPathId);
-                key->SetPartIdx(partIdx);
-
-                if (includePathColumn) {
-                    stats->SetPath(tableStats.Path);
-                }
-
-                if (++count == BatchSize) {
+                if (stats && ++count == BatchSize) {
                     auto* next = result->Record.MutableNext();
                     next->SetOwnerId(pathId.OwnerId);
                     next->SetPathId(pathId.LocalPathId);
