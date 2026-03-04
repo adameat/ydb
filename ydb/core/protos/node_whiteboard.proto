@@ -1,4 +1,5 @@
 import "ydb/library/actors/protos/interconnect.proto";
+import "ydb/core/protos/feature_flags.proto";
 import "ydb/core/protos/tablet.proto";
 import "ydb/core/protos/subdomains.proto";
 import "ydb/core/protos/blobstorage_disk.proto";
@@ -376,6 +377,7 @@ message TSystemStateInfo {
     optional uint64 PID = 45;
     optional uint64 GrpcRequestBytes = 46; // gRPC request throughput in bytes per second
     optional uint64 GrpcResponseBytes = 47; // gRPC response throughput in bytes per second
+    optional NKikimrConfig.TFeatureFlags FeatureFlags = 48;
 }
 
 message TEvSystemStateRequest {

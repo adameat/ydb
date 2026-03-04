@@ -7,6 +7,7 @@
 #include <ydb/core/util/cpuinfo.h>
 #include <ydb/core/util/tuples.h>
 #include <ydb/library/actors/core/actor_bootstrapped.h>
+#include <ydb/core/protos/feature_flags.pb.h>
 
 namespace NKikimr::NNodeWhiteboard {
 
@@ -842,6 +843,7 @@ protected:
             }
             eFlag = std::max(eFlag, flag);
         }
+        SystemStateInfo.MutableFeatureFlags()->CopyFrom(AppData()->FeatureFlags);
         if (!SystemStateInfo.HasSystemState() || SystemStateInfo.GetSystemState() != eFlag) {
             SystemStateInfo.SetSystemState(eFlag);
             SystemStateInfo.SetChangeTime(TActivationContext::Now().MilliSeconds());

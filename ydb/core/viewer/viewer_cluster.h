@@ -101,6 +101,7 @@ class TJsonCluster : public TViewerPipeClient {
     TString DomainName;
     TTabletId RootHiveId = 0;
     bool Tablets = false;
+    bool FeatureFlags = false;
 
 public:
     TJsonCluster(IViewer* viewer, NMon::TEvHttpInfo::TPtr& ev)
@@ -110,6 +111,7 @@ public:
 
     void Bootstrap() override {
         Tablets = FromStringWithDefault<bool>(Params.Get("tablets"), false);
+        FeatureFlags = FromStringWithDefault<bool>(Params.Get("feature_flags"), FeatureFlags);
         OffloadMerge = FromStringWithDefault<bool>(Params.Get("offload_merge"), OffloadMerge);
         OffloadMergeAttempts = FromStringWithDefault<bool>(Params.Get("offload_merge_attempts"), OffloadMergeAttempts);
         UseHealthCheck = FromStringWithDefault<bool>(Params.Get("use_health_check"), UseHealthCheck);
@@ -423,6 +425,9 @@ private:
         request->AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kNetworkUtilizationFieldNumber);
         request->AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kNetworkWriteThroughputFieldNumber);
         request->AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kRealNumberOfCpusFieldNumber);
+        if (FeatureFlags) {
+            request->AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kFeatureFlagsFieldNumber);
+        }
     }
 
     void InitTabletWhiteboardRequest(NKikimrWhiteboard::TEvTabletStateRequest* request) {
@@ -622,6 +627,16 @@ private:
             }
             if (systemState.HasNetworkWriteThroughput()) {
                 ClusterInfo.SetNetworkWriteThroughput(ClusterInfo.GetNetworkWriteThroughput() + systemState.GetNetworkWriteThroughput());
+            }
+            if (FeatureFlags) {
+                std::vector<const google::protobuf::FieldDescriptor*> fields;
+                const google::protobuf::Reflection* reflection = systemState.GetFeatureFlags().GetReflection();
+                reflection->ListFields(systemState.GetFeatureFlags(), &fields);
+                for (const auto& field : fields) {
+                    if (field->type() == google::protobuf::FieldDescriptor::TYPE_BOOL && reflection->GetBool(systemState.GetFeatureFlags(), field)) {
+                        (*ClusterInfo.MutableFeatureFlags())[field->name()] += 1;
+                    }
+                }
             }
         }
 

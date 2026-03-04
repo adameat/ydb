@@ -57,6 +57,7 @@ class TJsonTenantInfo : public TViewerPipeClient {
     bool MemoryStats = false;
     bool Nodes = false;
     bool Users = false;
+    bool FeatureFlags = false;
     bool OffloadMerge = false;
     bool MetadataCache = true;
     bool ShowAllDatabases = false;
@@ -134,6 +135,7 @@ public:
         MemoryStats = FromStringWithDefault<bool>(params.Get("memory"), MemoryStats);
         Nodes = FromStringWithDefault<bool>(params.Get("nodes"), Nodes);
         Users = FromStringWithDefault<bool>(params.Get("users"), Users);
+        FeatureFlags = FromStringWithDefault<bool>(params.Get("feature_flags"), FeatureFlags);
         User = params.Get("user");
         OffloadMerge = FromStringWithDefault<bool>(params.Get("offload_merge"), OffloadMerge);
         MetadataCache = FromStringWithDefault<bool>(params.Get("metadata_cache"), MetadataCache);
@@ -344,6 +346,9 @@ public:
         request.AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kRealNumberOfCpusFieldNumber);
         request.AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kGrpcRequestBytesFieldNumber);
         request.AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kGrpcResponseBytesFieldNumber);
+        if (FeatureFlags) {
+            request.AddFieldsRequired(NKikimrWhiteboard::TSystemStateInfo::kFeatureFlagsFieldNumber);
+        }
     }
 
     void SendWhiteboardSystemStateRequest(const TNodeId nodeId) {
@@ -1011,6 +1016,16 @@ public:
                         if (Nodes) {
                             tenant.AddNodes()->CopyFrom(nodeInfo);
                         }
+                        if (FeatureFlags) {
+                            std::vector<const google::protobuf::FieldDescriptor*> fields;
+                            const google::protobuf::Reflection* reflection = nodeInfo.GetFeatureFlags().GetReflection();
+                            reflection->ListFields(nodeInfo.GetFeatureFlags(), &fields);
+                            for (const auto& field : fields) {
+                                if (field->type() == google::protobuf::FieldDescriptor::TYPE_BOOL && reflection->GetBool(nodeInfo.GetFeatureFlags(), field)) {
+                                    (*tenant.MutableFeatureFlags())[field->name()] += 1;
+                                }
+                            }
+                        }
                         for (const auto& poolStat : nodeInfo.GetPoolStats()) {
                             TString poolName = poolStat.GetName();
                             NKikimrWhiteboard::TSystemStateInfo_TPoolStats* targetPoolStat = nullptr;
@@ -1070,6 +1085,7 @@ public:
                     }
                     tenantNodes.emplace(nodeId);
                 }
+                tenant.SetNodesResponded(tenantNodes.size());
                 if (nodesWithNetworkUtilization != 0) {
                     tenant.SetNetworkUtilization(tenant.GetNetworkUtilization() / nodesWithNetworkUtilization);
                 }

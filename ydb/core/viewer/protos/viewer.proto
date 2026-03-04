@@ -362,6 +362,7 @@ message TClusterInfo {
     double NetworkUtilization = 62;
     uint64 NetworkWriteThroughput = 63;
     TBridgeInfo BridgeInfo = 64;
+    map<string, uint32> FeatureFlags = 65;
 }
 
 enum ETenantType {
@@ -421,6 +422,8 @@ message TTenant {
     uint64 NetworkWriteThroughput = 53;
     uint64 GrpcRequestBytes = 54;
     uint64 GrpcResponseBytes = 55;
+    map<string, uint32> FeatureFlags = 56;
+    uint32 NodesResponded = 57;
 }
 
 message TTenants {
@@ -933,7 +936,7 @@ message TDatabaseStats {
     // grpc
     optional uint64 GrpcRequestBytes = 101;
     optional uint64 GrpcResponseBytes = 102;
-    
+
     // database nodes
     optional uint32 DatabaseNodes = 201;
     optional float DatabaseCpuUsage = 202;
